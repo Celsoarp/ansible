@@ -109,6 +109,18 @@ options:
     default: "us-central1-a"
     choices: ["us-central1-a", "us-central1-b", "us-central2-a", "europe-west1-a", "europe-west1-b"]
     aliases: []
+  wait:
+    description:
+      - wait for the instance to be in state 'running' before returning
+    required: false
+    default: "no"
+    choices: [ "yes", "no" ]
+    aliases: []
+  wait_timeout:
+    description:
+      - how long before wait gives up, in seconds
+    default: 600
+    aliases: []
 
 requirements: [ "libcloud" ]
 notes:
@@ -188,6 +200,7 @@ except ImportError:
         "msg='libcloud with GCE support (0.13.3+) required for this module'")
     sys.exit(1)
 
+
 try:
     from ast import literal_eval
 except ImportError:
@@ -244,6 +257,8 @@ def create_instances(module, gce, instance_names):
     state = module.params.get('state')
     tags = module.params.get('tags')
     zone = module.params.get('zone')
+    wait = module.params.get('wait')
+    wait_timeout = module.params.get('wait_timeout')
 
     new_instances = []
     changed = False
@@ -303,6 +318,19 @@ def create_instances(module, gce, instance_names):
         if inst:
             new_instances.append(inst)
 
+    # let's wait for the instances to be up and running
+    if wait == "yes":
+        instances_data = gce.wait_until_running(new_instances, wait_period=10, timeout=int(wait_timeout), ssh_interface='public_ips', force_ipv4=True)
+        not_running = []
+        for instance in instances_data:
+            (node, ip) = instance
+            # 0 is 'RUNNING'
+            if node.state != 0:
+                not_running.append(node.name)
+
+        if len(not_running) > 0:
+            module.fail_json(msg="wait for instances running timeout on the following instances: %s" % ', '.join(not_running))
+
     instance_names = []
     instance_json_data = []
     for inst in new_instances:
@@ -361,6 +389,8 @@ def main():
             service_account_email = dict(),
             pem_file = dict(),
             project_id = dict(),
+            wait = dict(default='no', choices=['yes', 'no']),
+            wait_timeout = dict(default=600),
         )
     )
 
